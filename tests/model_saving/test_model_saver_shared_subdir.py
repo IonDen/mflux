@@ -2,6 +2,7 @@ import pytest
 from mlx import nn
 
 from mflux.models.common.weights.loading.weight_definition import ComponentDefinition
+from mflux.models.common.weights.saving.model_saver import ModelSaver
 from tests.model_saving.tiny_checkpoint_helper import TinyCheckpointRoundtrip
 
 
@@ -53,3 +54,35 @@ class TestModelSaverSharedSubdir:
             base_path=tmp_path / "shared_subdir_tiny_q8",
             bits=8,
         )
+
+    @pytest.mark.fast
+    def test_two_written_components_in_the_same_directory_raise(self, tmp_path):
+        # save_subdirs cannot separate a shared-source pair (both prefix-filtered keep the
+        # shared hf_subdir), and it is not meant to: FIBO VLM's filtered decoder/visual are
+        # nested, so only one is ever written. But if a definition ever puts two components
+        # that are BOTH written into one directory, the second would silently overwrite the
+        # first's shards and index (#621). ModelSaver must fail loudly instead.
+        class _FilteredPairDefinition:
+            @staticmethod
+            def get_components():
+                return [
+                    ComponentDefinition(name="a", hf_subdir="", weight_prefix_filters=["x"]),
+                    ComponentDefinition(name="b", hf_subdir="", weight_prefix_filters=["y"]),
+                ]
+
+            @staticmethod
+            def get_tokenizers():
+                return []
+
+        class _Model:
+            def __init__(self):
+                self.a = _TinyComponent()
+                self.b = _TinyComponent()
+
+        with pytest.raises(ValueError, match="both save to"):
+            ModelSaver.save_model(
+                model=_Model(),
+                bits=8,
+                base_path=str(tmp_path / "collide"),
+                weight_definition=_FilteredPairDefinition,
+            )

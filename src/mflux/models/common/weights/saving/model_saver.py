@@ -31,6 +31,27 @@ class ModelSaver:
         # when components share an hf_subdir (SeedVR2), where saving to the shared directory
         # would overwrite one component's shards and index with the other's (#621).
         save_subdirs = ComponentDefinition.save_subdirs(weight_definition.get_components())
+
+        # No two components that are actually written may land in the same directory, or the
+        # second's shards and index overwrite the first's (#621). save_subdirs separates
+        # independent components; this catches the case it deliberately leaves alone — a
+        # prefix-filtered shared-source pair (FIBO VLM) is only safe because just one of the
+        # pair is a real attribute, so only one is written. Checked before anything reaches
+        # disk, and by attribute presence so a nested/aliased component that is not written
+        # is not counted.
+        written_dirs: dict[str, str] = {}
+        for component_def in weight_definition.get_components():
+            attr_name = component_def.model_attr or component_def.name
+            if getattr(model, attr_name, None) is None:
+                continue
+            subdir = save_subdirs[component_def.name]
+            if subdir in written_dirs:
+                raise ValueError(
+                    f"Components '{written_dirs[subdir]}' and '{component_def.name}' both save to "
+                    f"'{subdir or '.'}'; give them distinct hf_subdirs so their checkpoints do not collide."
+                )
+            written_dirs[subdir] = component_def.name
+
         components = []
         for component_def in weight_definition.get_components():
             attr_name = component_def.model_attr or component_def.name
