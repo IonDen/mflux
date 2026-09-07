@@ -57,11 +57,8 @@ class TestModelSaverSharedSubdir:
 
     @pytest.mark.fast
     def test_two_written_components_in_the_same_directory_raise(self, tmp_path):
-        # save_subdirs cannot separate a shared-source pair (both prefix-filtered keep the
-        # shared hf_subdir), and it is not meant to: FIBO VLM's filtered decoder/visual are
-        # nested, so only one is ever written. But if a definition ever puts two components
-        # that are BOTH written into one directory, the second would silently overwrite the
-        # first's shards and index (#621). ModelSaver must fail loudly instead.
+        # If a definition ever writes two components into one directory, the second would
+        # silently overwrite the first's shards and index (#621); ModelSaver must fail loudly.
         class _FilteredPairDefinition:
             @staticmethod
             def get_components():
@@ -85,4 +82,44 @@ class TestModelSaverSharedSubdir:
                 bits=8,
                 base_path=str(tmp_path / "collide"),
                 weight_definition=_FilteredPairDefinition,
+            )
+
+    def test_independent_components_spelled_empty_and_dot_do_not_collide(self):
+        # "" and "." are the same directory. Two independent components spelled differently
+        # must still be separated, not left to overwrite each other (#621).
+        components = [
+            ComponentDefinition(name="a", hf_subdir=""),
+            ComponentDefinition(name="b", hf_subdir="."),
+        ]
+        subdirs = ComponentDefinition.save_subdirs(components)
+        from pathlib import Path
+
+        assert str(Path(subdirs["a"])) != str(Path(subdirs["b"]))
+
+    def test_guard_catches_a_collision_spelled_empty_and_dot(self, tmp_path):
+        # The save-time guard compares resolved directories, so a shared-source pair spelled
+        # "" and "." (which save_subdirs leaves in place) is still caught, not missed (#621).
+        class _FilteredDotPairDefinition:
+            @staticmethod
+            def get_components():
+                return [
+                    ComponentDefinition(name="a", hf_subdir="", weight_prefix_filters=["x"]),
+                    ComponentDefinition(name="b", hf_subdir=".", weight_prefix_filters=["y"]),
+                ]
+
+            @staticmethod
+            def get_tokenizers():
+                return []
+
+        class _Model:
+            def __init__(self):
+                self.a = _TinyComponent()
+                self.b = _TinyComponent()
+
+        with pytest.raises(ValueError, match="both save to"):
+            ModelSaver.save_model(
+                model=_Model(),
+                bits=8,
+                base_path=str(tmp_path / "collide_dot"),
+                weight_definition=_FilteredDotPairDefinition,
             )
