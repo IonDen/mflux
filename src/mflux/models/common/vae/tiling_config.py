@@ -13,7 +13,7 @@ class TilingConfig:
     vae_encode_tile_overlap: int = 64
 
     @staticmethod
-    def may_tile_implicitly(model) -> bool:
+    def may_tile_implicitly(model: object) -> bool:
         # Memory-saving modes choose tiled decoding on the user's behalf, so they only do so on
         # decoders where tiling costs nothing visually. A decoder that opts out still tiles
         # whenever the user asks for it with --vae-tiling.

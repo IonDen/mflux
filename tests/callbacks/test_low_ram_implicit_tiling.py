@@ -27,15 +27,17 @@ class _Model:
         self.tiling_config = tiling_config
 
 
-def _low_ram_args() -> Namespace:
-    return Namespace(
-        low_ram=True,
-        mlx_cache_limit_gb=None,
-        vae_tiling=False,
-        vae_tile_size=None,
-        seed=[],
-        image_path=[],
-    )
+class _Args:
+    @staticmethod
+    def low_ram() -> Namespace:
+        return Namespace(
+            low_ram=True,
+            mlx_cache_limit_gb=None,
+            vae_tiling=False,
+            vae_tile_size=None,
+            seed=[],
+            image_path=[],
+        )
 
 
 @pytest.mark.fast
@@ -93,7 +95,7 @@ def test_low_ram_leaves_a_real_flux2_klein_untiled():
     model.vae = Flux2VAE()
     model.tiling_config = None
 
-    CallbackManager._register_memory_saver(_low_ram_args(), model)
+    CallbackManager._register_memory_saver(_Args.low_ram(), model)
 
     assert model.tiling_config is None
 
@@ -105,7 +107,7 @@ def test_low_ram_tiles_a_real_krea2():
     model.vae = QwenVAE()
     model.tiling_config = None
 
-    CallbackManager._register_memory_saver(_low_ram_args(), model)
+    CallbackManager._register_memory_saver(_Args.low_ram(), model)
 
     assert model.tiling_config is not None
 
@@ -116,7 +118,7 @@ def test_explicit_vae_tiling_still_tiles_a_real_flux2_klein():
     model.callbacks = CallbackRegistry()
     model.vae = Flux2VAE()
     model.tiling_config = None
-    args = _low_ram_args()
+    args = _Args.low_ram()
     args.vae_tiling = True
 
     CallbackManager._register_memory_saver(args, model)
