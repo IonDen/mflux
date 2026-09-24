@@ -63,10 +63,7 @@ class WeightMapper:
     ) -> List[WeightTarget]:
         # Met when any expanded source name is present. Counted per declared target, not per expanded tensor:
         # _build_flat_mapping expands every block pattern to the largest block count it detects.
-        if num_blocks is None:
-            num_blocks = WeightMapper._detect_num_blocks(hf_weights)
-        if num_layers is None:
-            num_layers = WeightMapper._detect_num_layers(hf_weights)
+        num_blocks, num_layers = WeightMapper._block_and_layer_counts(hf_weights, num_blocks, num_layers)
         return [
             target
             for target in mapping
@@ -75,6 +72,27 @@ class WeightMapper:
                 name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)
             )
         ]
+
+    @staticmethod
+    def unmapped_names(
+        hf_weights: Dict[str, mx.array],
+        mapping: List[WeightTarget],
+        num_blocks: Optional[int] = None,
+        num_layers: Optional[int] = None,
+    ) -> List[str]:
+        num_blocks, num_layers = WeightMapper._block_and_layer_counts(hf_weights, num_blocks, num_layers)
+        used = WeightMapper._build_flat_mapping(mapping, num_blocks, num_layers)
+        return sorted(name for name in hf_weights if name not in used)
+
+    @staticmethod
+    def _block_and_layer_counts(
+        hf_weights: Dict[str, mx.array], num_blocks: Optional[int], num_layers: Optional[int]
+    ) -> tuple[int, int]:
+        if num_blocks is None:
+            num_blocks = WeightMapper._detect_num_blocks(hf_weights)
+        if num_layers is None:
+            num_layers = WeightMapper._detect_num_layers(hf_weights)
+        return num_blocks, num_layers
 
     @staticmethod
     def _detect_num_blocks(hf_weights: Dict[str, mx.array]) -> int:

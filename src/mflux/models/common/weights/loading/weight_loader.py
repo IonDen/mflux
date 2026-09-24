@@ -190,7 +190,10 @@ class WeightLoader:
             num_layers=component.num_layers,
         )
         if missing:
-            raise ModelConfigError(WeightLoader._describe_missing_weights(component, missing, raw_weights))
+            source = component.download_url or str(root_path / component.hf_subdir)
+            raise ModelConfigError(
+                WeightLoader._describe_missing_weights(component, source, mapping, missing, raw_weights)
+            )
         mapped_weights = WeightMapper.apply_mapping(
             hf_weights=raw_weights,
             mapping=mapping,
@@ -461,12 +464,25 @@ class WeightLoader:
 
     @staticmethod
     def _describe_missing_weights(
-        component: ComponentDefinition, missing: list[WeightTarget], raw_weights: dict[str, mx.array]
+        component: ComponentDefinition,
+        source: str,
+        mapping: list[WeightTarget],
+        missing: list[WeightTarget],
+        raw_weights: dict[str, mx.array],
     ) -> str:
-        expected = ", ".join(target.from_pattern[0] for target in missing[:3])
-        found = ", ".join(sorted(raw_weights)[:3]) or "no tensors"
+        expected = ", ".join(WeightLoader._example_name(target) for target in missing[:3])
+        # Names the mapping does not use point at the rename; the matched ones would only hide it.
+        unmapped = WeightMapper.unmapped_names(raw_weights, mapping, component.num_blocks, component.num_layers)
+        found = ", ".join((unmapped or sorted(raw_weights))[:3]) or "none under the names this component reads"
         return (
-            f"The {component.name} weights do not fit this model: {len(missing)} required tensors have no match "
-            f"(expected names like {expected}; the checkpoint has {found}). It was probably converted for another "
-            f"program or model. Use a checkpoint in the original layout, or one written by mflux-save."
+            f"The {component.name} weights in {source} do not fit this model: {len(missing)} required weights have "
+            f"no match (expected names like {expected}; found {found}). The checkpoint was probably converted for "
+            f"another program or model. Use one in the original layout, or one written by mflux-save."
         )
+
+    @staticmethod
+    def _example_name(target: WeightTarget) -> str:
+        name = target.from_pattern[0] if target.from_pattern else target.to_pattern
+        for placeholder in ("{block}", "{layer}", "{i}", "{res}"):
+            name = name.replace(placeholder, "0")
+        return name
