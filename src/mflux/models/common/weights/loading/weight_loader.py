@@ -16,6 +16,8 @@ from mflux.models.common.weights.loading.loaded_weights import LoadedWeights, Me
 from mflux.models.common.weights.loading.safetensors_reader import SafetensorsReader
 from mflux.models.common.weights.loading.weight_definition import ComponentDefinition
 from mflux.models.common.weights.mapping.weight_mapper import WeightMapper
+from mflux.models.common.weights.mapping.weight_mapping import WeightTarget
+from mflux.utils.exceptions import ModelConfigError
 
 if TYPE_CHECKING:
     from mflux.models.common.weights.loading.weight_definition import WeightDefinitionType
@@ -180,9 +182,18 @@ class WeightLoader:
             return tree_unflatten(list(raw_weights.items())), None, None
 
         # Standard mode: apply declarative weight mapping
+        mapping = component.mapping_getter()
+        missing = WeightMapper.missing_required_targets(
+            hf_weights=raw_weights,
+            mapping=mapping,
+            num_blocks=component.num_blocks,
+            num_layers=component.num_layers,
+        )
+        if missing:
+            raise ModelConfigError(WeightLoader._describe_missing_weights(component, missing, raw_weights))
         mapped_weights = WeightMapper.apply_mapping(
             hf_weights=raw_weights,
-            mapping=component.mapping_getter(),
+            mapping=mapping,
             num_blocks=component.num_blocks,
             num_layers=component.num_layers,
         )
@@ -447,3 +458,15 @@ class WeightLoader:
     @staticmethod
     def _convert_precision(weights: dict[str, mx.array], precision: mx.Dtype) -> dict[str, mx.array]:
         return {k: v if v.dtype == precision else v.astype(precision) for k, v in weights.items()}
+
+    @staticmethod
+    def _describe_missing_weights(
+        component: ComponentDefinition, missing: list[WeightTarget], raw_weights: dict[str, mx.array]
+    ) -> str:
+        expected = ", ".join(target.from_pattern[0] for target in missing[:3])
+        found = ", ".join(sorted(raw_weights)[:3]) or "no tensors"
+        return (
+            f"The {component.name} weights do not fit this model: {len(missing)} required tensors have no match "
+            f"(expected names like {expected}; the checkpoint has {found}). It was probably converted for another "
+            f"program or model. Use a checkpoint in the original layout, or one written by mflux-save."
+        )
