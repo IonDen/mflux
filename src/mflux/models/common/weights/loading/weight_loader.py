@@ -482,8 +482,9 @@ class WeightLoader:
         found = ", ".join(([name for name in listed if name in unmapped] or listed)[:3])
         found = found or "none under the names this component reads"
         return (
-            f"The {component.name} weights in {source} do not fit this model: {len(missing)} required weights have "
-            f"no match (expected names like {expected}; found {found}). The checkpoint was probably converted for "
+            f"The {component.name} weights in {source} do not fit this model: {len(missing)} required "
+            f"{'weight has' if len(missing) == 1 else 'weights have'} no match (expected names like {expected}; "
+            f"found {found}). The checkpoint was probably converted for "
             f"another program or model. Use one in the original layout, or one written by mflux-save."
         )
 

@@ -25,6 +25,8 @@ from mflux.models.seedvr2.weights.seedvr2_weight_definition import (
 #   seedvr2_7b_transformer   numz/SeedVR2_comfyUI @ 09ced7102363  seedvr2_ema_7b_fp16.safetensors
 #   qwen21_text_encoder      Qwen/Qwen-Image-2.1 @ 790c92633540  text_encoder/
 #   qwen21_transformer       Qwen/Qwen-Image-2.1 @ 790c92633540  transformer/
+# To regenerate one, take the keys of mx.load(<file>) (lazy, reads no weights) or of the shard index's weight_map;
+# only fibo_vlm_decoder is then filtered, to the "model.language_model" and "lm_head" prefixes.
 # A required mapping entry these names cannot satisfy would reject the official checkpoint at load time.
 
 

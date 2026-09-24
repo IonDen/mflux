@@ -64,6 +64,13 @@ def test_a_checkpoint_whose_names_match_nothing_is_rejected(tmp_path):
 
 
 @pytest.mark.fast
+def test_the_message_counts_a_single_missing_weight_in_the_singular(tmp_path):
+    message = _TinyModel.rejection(tmp_path, {"other.proj.weight": mx.ones((2, 2))})
+
+    assert "1 required weight has no match" in message
+
+
+@pytest.mark.fast
 def test_a_checkpoint_with_every_required_weight_loads(tmp_path):
     _TinyModel.write(tmp_path, {"model.proj.weight": mx.ones((2, 2)), "unrelated.bias": mx.ones((2,))})
 
