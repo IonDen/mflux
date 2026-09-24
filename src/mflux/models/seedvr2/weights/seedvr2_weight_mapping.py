@@ -341,17 +341,21 @@ class SeedVR2WeightMapping(WeightMapping):
                 max_blocks=num_blocks,
                 required=False,
             ),
+            # 7B runs without the output ada (seedvr2-7b sets use_output_ada=False); 3B has it.
             WeightTarget(
                 to_pattern="vid_out_norm.weight",
                 from_pattern=["vid_out_norm.weight"],
+                required=False,
             ),
             WeightTarget(
                 to_pattern="out_shift",
                 from_pattern=["vid_out_ada.out_shift"],
+                required=False,
             ),
             WeightTarget(
                 to_pattern="out_scale",
                 from_pattern=["vid_out_ada.out_scale"],
+                required=False,
             ),
             WeightTarget(
                 to_pattern="vid_out.proj.weight",
