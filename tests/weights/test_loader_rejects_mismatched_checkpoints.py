@@ -104,3 +104,11 @@ def test_the_message_skips_quantization_scales_of_weights_that_matched(tmp_path)
     assert "model.renamed.weight" in message
     assert "scales" not in message
     assert "biases" not in message
+
+
+@pytest.mark.fast
+def test_a_quantized_checkpoint_missing_a_weight_outright_lists_its_weights_not_their_scales(tmp_path):
+    quantized = {f"model.{layer}.{part}": mx.ones((2,)) for layer in "ab" for part in ("weight", "scales", "biases")}
+    message = _QuantizedModel.rejection(tmp_path, quantized)
+
+    assert "found model.a.weight, model.b.weight)" in message

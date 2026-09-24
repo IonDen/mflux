@@ -472,14 +472,15 @@ class WeightLoader:
     ) -> str:
         expected = ", ".join(WeightLoader._example_name(target) for target in missing[:3])
         # Names the mapping does not use point at the rename; the matched ones would only hide it.
-        unmapped = WeightMapper.unmapped_names(raw_weights, mapping, component.num_blocks, component.num_layers)
         # A quantized checkpoint's scales and biases are never in the mapping; they would crowd out the rename.
-        unmapped = [
+        listed = [
             name
-            for name in unmapped
+            for name in sorted(raw_weights)
             if not (name.endswith((".scales", ".biases")) and f"{name.rsplit('.', 1)[0]}.weight" in raw_weights)
         ]
-        found = ", ".join((unmapped or sorted(raw_weights))[:3]) or "none under the names this component reads"
+        unmapped = set(WeightMapper.unmapped_names(raw_weights, mapping, component.num_blocks, component.num_layers))
+        found = ", ".join(([name for name in listed if name in unmapped] or listed)[:3])
+        found = found or "none under the names this component reads"
         return (
             f"The {component.name} weights in {source} do not fit this model: {len(missing)} required weights have "
             f"no match (expected names like {expected}; found {found}). The checkpoint was probably converted for "
