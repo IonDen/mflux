@@ -55,6 +55,28 @@ class WeightMapper:
         return mapped_weights
 
     @staticmethod
+    def missing_required_targets(
+        hf_weights: Dict[str, mx.array],
+        mapping: List[WeightTarget],
+        num_blocks: Optional[int] = None,
+        num_layers: Optional[int] = None,
+    ) -> List[WeightTarget]:
+        # Met when any expanded source name is present. Counted per declared target, not per expanded tensor:
+        # _build_flat_mapping expands every block pattern to the largest block count it detects.
+        if num_blocks is None:
+            num_blocks = WeightMapper._detect_num_blocks(hf_weights)
+        if num_layers is None:
+            num_layers = WeightMapper._detect_num_layers(hf_weights)
+        return [
+            target
+            for target in mapping
+            if target.required
+            and not any(
+                name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)
+            )
+        ]
+
+    @staticmethod
     def _detect_num_blocks(hf_weights: Dict[str, mx.array]) -> int:
         block_numbers = set()
         for key in hf_weights.keys():
