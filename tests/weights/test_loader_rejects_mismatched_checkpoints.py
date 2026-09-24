@@ -45,6 +45,14 @@ class _BlockModel(_TinyModel):
     ]
 
 
+class _QuantizedModel(_TinyModel):
+    MAPPING = [
+        WeightTarget(to_pattern="a.weight", from_pattern=["model.a.weight"]),
+        WeightTarget(to_pattern="b.weight", from_pattern=["model.b.weight"]),
+        WeightTarget(to_pattern="proj.weight", from_pattern=["model.proj.weight"]),
+    ]
+
+
 @pytest.mark.fast
 def test_a_checkpoint_whose_names_match_nothing_is_rejected(tmp_path):
     message = _TinyModel.rejection(tmp_path, {"other.proj.weight": mx.ones((2, 2))})
@@ -84,3 +92,15 @@ def test_the_message_shows_the_renamed_tensor_not_the_ones_that_matched(tmp_path
     assert "model.kept.weight" not in message
     assert "model.blocks.0.proj.weight" in message
     assert "{block}" not in message
+
+
+@pytest.mark.fast
+def test_the_message_skips_quantization_scales_of_weights_that_matched(tmp_path):
+    # The issue 748 checkpoint is 4-bit: 464 of its 467 unused names were the scales and biases of weights that
+    # matched, and they sorted ahead of the three renamed tensors.
+    quantized = {f"model.{layer}.{part}": mx.ones((2,)) for layer in "ab" for part in ("weight", "scales", "biases")}
+    message = _QuantizedModel.rejection(tmp_path, quantized | {"model.renamed.weight": mx.ones((2,))})
+
+    assert "model.renamed.weight" in message
+    assert "scales" not in message
+    assert "biases" not in message
