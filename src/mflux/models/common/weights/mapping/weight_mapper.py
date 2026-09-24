@@ -7,6 +7,8 @@ from mflux.models.common.weights.mapping.weight_mapping import WeightTarget
 
 
 class WeightMapper:
+    _PLACEHOLDERS = ("{block}", "{layer}", "{i}", "{res}")
+
     @staticmethod
     def apply_mapping(
         hf_weights: Dict[str, mx.array],
@@ -104,52 +106,75 @@ class WeightMapper:
     def _first_missing_name(
         hf_weights: Dict[str, mx.array], target: WeightTarget, num_blocks: int, num_layers: int
     ) -> Optional[str]:
-        # A required block or layer weight has to be in every block of its family that the checkpoint has. Only
-        # blocks the checkpoint has count: _build_flat_mapping expands every block pattern to the largest block count
-        # it detects, and trimmed checkpoints ship fewer blocks. Optional ones are left alone, since some sit in only
+        # A required weight has to be in every block, layer and resnet the checkpoint has at its place in the pattern.
+        # Only indices the checkpoint has count: _build_flat_mapping expands placeholders to detected or fixed counts
+        # (every block pattern to the largest block count it detects, {i} to two where a VAE mid block has a single
+        # attention), and trimmed checkpoints ship fewer blocks. Optional ones are left alone, since some sit in only
         # some blocks (the last up block of the FLUX.1 VAE has no upsampler).
         if not target.required:
             return None
         if not any(name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)):
             return WeightMapper._example_name(target)
-        indexed = WeightMapper._indexed_patterns(target)
-        for index in WeightMapper._present_indices(hf_weights, indexed):
-            if target.max_blocks is not None and index >= target.max_blocks:
-                continue
-            names = [pattern.replace(placeholder, str(index)) for pattern, placeholder in indexed]
-            if not any(name in hf_weights for name in names):
-                return names[0]
+        patterns = WeightMapper._indexed_patterns(target)
+        for pattern in patterns:
+            for indices in WeightMapper._present_indices(hf_weights, pattern, target.max_blocks):
+                alternatives = [p for p in patterns if WeightMapper._placeholders(p) == set(indices)]
+                names = [WeightMapper._fill(p, indices) for p in alternatives]
+                if not any(name in hf_weights for name in names):
+                    return names[0]
         return None
 
     @staticmethod
-    def _indexed_patterns(target: WeightTarget) -> List[tuple[str, str]]:
-        # Source patterns numbered by one {block} or {layer} that the destination is numbered by too. Up blocks
-        # ({block} with {res}) and one-to-many sources keep the any-name rule.
+    def _indexed_patterns(target: WeightTarget) -> List[str]:
+        # Source patterns whose every placeholder numbers the destination too. A source copied to every block
+        # (one-to-many) keeps the any-name rule.
         indexed = []
         for pattern in target.from_pattern:
-            placeholders = [p for p in ("{block}", "{layer}", "{i}", "{res}") if p in pattern]
-            if len(placeholders) == 1 and placeholders[0] in ("{block}", "{layer}"):
-                placeholder = placeholders[0]
-                if placeholder in target.to_pattern and pattern.index(placeholder) > 0:
-                    indexed.append((pattern, placeholder))
+            placeholders = WeightMapper._placeholders(pattern)
+            if placeholders and all(p in target.to_pattern for p in placeholders):
+                if min(pattern.index(p) for p in placeholders) > 0:
+                    indexed.append(pattern)
         return indexed
 
     @staticmethod
-    def _present_indices(hf_weights: Dict[str, mx.array], indexed: List[tuple[str, str]]) -> List[int]:
-        present = set()
-        for pattern, placeholder in indexed:
-            prefix = pattern[: pattern.index(placeholder)]
-            for name in hf_weights:
-                if name.startswith(prefix):
-                    head = name[len(prefix) :].split(".", 1)[0]
-                    if head.isdigit():
-                        present.add(int(head))
-        return sorted(present)
+    def _present_indices(
+        hf_weights: Dict[str, mx.array], pattern: str, max_blocks: Optional[int]
+    ) -> List[Dict[str, int]]:
+        # Every combination of indices the checkpoint has for this pattern, outermost placeholder first, so a
+        # (block, res) pair counts only when that block has that resnet.
+        placeholders = sorted(WeightMapper._placeholders(pattern), key=pattern.index)
+        if not placeholders:
+            return [{}]
+        first = placeholders[0]
+        prefix = pattern[: pattern.index(first)]
+        found = set()
+        for name in hf_weights:
+            if name.startswith(prefix):
+                head = name[len(prefix) :].split(".", 1)[0]
+                if head.isdigit():
+                    found.add(int(head))
+        present = []
+        for index in sorted(found):
+            if first == "{block}" and max_blocks is not None and index >= max_blocks:
+                continue
+            inner = WeightMapper._present_indices(hf_weights, pattern.replace(first, str(index)), max_blocks)
+            present.extend({first: index, **rest} for rest in inner)
+        return present
+
+    @staticmethod
+    def _placeholders(pattern: str) -> set[str]:
+        return {p for p in WeightMapper._PLACEHOLDERS if p in pattern}
+
+    @staticmethod
+    def _fill(pattern: str, indices: Dict[str, int]) -> str:
+        for placeholder, index in indices.items():
+            pattern = pattern.replace(placeholder, str(index))
+        return pattern
 
     @staticmethod
     def _example_name(target: WeightTarget) -> str:
         name = target.from_pattern[0] if target.from_pattern else target.to_pattern
-        for placeholder in ("{block}", "{layer}", "{i}", "{res}"):
+        for placeholder in WeightMapper._PLACEHOLDERS:
             name = name.replace(placeholder, "0")
         return name
 

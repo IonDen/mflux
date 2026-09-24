@@ -101,3 +101,45 @@ def test_a_block_weight_capped_by_max_blocks_is_not_demanded_from_later_blocks()
     weights = _Weights.named("layers.0.before_proj.weight", "layers.0.proj.weight", "layers.1.proj.weight")
 
     assert WeightMapper.missing_required_names(weights, mapping) == []
+
+
+@pytest.mark.fast
+def test_a_mid_block_resnet_that_lacks_a_required_weight_is_reported():
+    mapping = [
+        WeightTarget(
+            to_pattern="mid.resnets.{i}.conv1.weight", from_pattern=["decoder.mid_block.resnets.{i}.conv1.weight"]
+        )
+    ]
+    weights = _Weights.named("decoder.mid_block.resnets.0.conv1.weight", "decoder.mid_block.resnets.1.conv2.weight")
+
+    assert WeightMapper.missing_required_names(weights, mapping) == ["decoder.mid_block.resnets.1.conv1.weight"]
+
+
+@pytest.mark.fast
+def test_an_up_block_resnet_that_lacks_a_required_weight_is_reported():
+    mapping = [
+        WeightTarget(
+            to_pattern="up.{block}.resnets.{res}.conv1.weight",
+            from_pattern=["decoder.up_blocks.{block}.resnets.{res}.conv1.weight"],
+        )
+    ]
+    weights = _Weights.named(
+        "decoder.up_blocks.0.resnets.0.conv1.weight",
+        "decoder.up_blocks.1.resnets.0.conv1.weight",
+        "decoder.up_blocks.1.resnets.1.conv2.weight",
+    )
+
+    assert WeightMapper.missing_required_names(weights, mapping) == ["decoder.up_blocks.1.resnets.1.conv1.weight"]
+
+
+@pytest.mark.fast
+def test_an_attention_index_the_checkpoint_does_not_have_is_not_demanded():
+    # The mapper expands {i} to two, but a VAE mid block has a single attention.
+    mapping = [
+        WeightTarget(
+            to_pattern="mid.attentions.{i}.to_q.weight", from_pattern=["decoder.mid_block.attentions.{i}.to_q.weight"]
+        )
+    ]
+    weights = _Weights.named("decoder.mid_block.attentions.0.to_q.weight")
+
+    assert WeightMapper.missing_required_names(weights, mapping) == []
