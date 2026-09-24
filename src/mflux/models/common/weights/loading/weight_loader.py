@@ -183,7 +183,7 @@ class WeightLoader:
 
         # Standard mode: apply declarative weight mapping
         mapping = component.mapping_getter()
-        missing = WeightMapper.missing_required_targets(
+        missing = WeightMapper.missing_required_names(
             hf_weights=raw_weights,
             mapping=mapping,
             num_blocks=component.num_blocks,
@@ -467,10 +467,10 @@ class WeightLoader:
         component: ComponentDefinition,
         source: str,
         mapping: list[WeightTarget],
-        missing: list[WeightTarget],
+        missing: list[str],
         raw_weights: dict[str, mx.array],
     ) -> str:
-        expected = ", ".join(WeightLoader._example_name(target) for target in missing[:3])
+        expected = ", ".join(missing[:3])
         # Names the mapping does not use point at the rename; the matched ones would only hide it.
         # A quantized checkpoint's scales and biases are never in the mapping; they would crowd out the rename.
         listed = [
@@ -487,10 +487,3 @@ class WeightLoader:
             f"found {found}). The checkpoint was probably converted for "
             f"another program or model. Use one in the original layout, or one written by mflux-save."
         )
-
-    @staticmethod
-    def _example_name(target: WeightTarget) -> str:
-        name = target.from_pattern[0] if target.from_pattern else target.to_pattern
-        for placeholder in ("{block}", "{layer}", "{i}", "{res}"):
-            name = name.replace(placeholder, "0")
-        return name

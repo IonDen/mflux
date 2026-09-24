@@ -10,11 +10,13 @@ from mflux.models.fibo.weights.fibo_weight_definition import FIBOWeightDefinitio
 from mflux.models.fibo_vlm.weights.fibo_vlm_weight_definition import FIBOVLMWeightDefinition
 from mflux.models.flux.weights.flux_weight_definition import FluxControlnetWeightDefinition, FluxWeightDefinition
 from mflux.models.flux.weights.flux_weight_mapping import FluxWeightMapping
+from mflux.models.qwen.weights.qwen_weight_definition import QwenWeightDefinition
 from mflux.models.qwen21.weights.qwen21_weight_definition import Qwen21WeightDefinition
 from mflux.models.seedvr2.weights.seedvr2_weight_definition import (
     SeedVR2WeightDefinition3B,
     SeedVR2WeightDefinition7B,
 )
+from mflux.models.z_image.weights.z_image_controlnet_weight_definition import ZImageControlnetWeightDefinition
 
 # Tensor names read from the safetensors headers of each official checkpoint (no weights), after the component's
 # own prefix filter and key transform, i.e. what the loader hands the check. Captured 2026-09-24 from:
@@ -25,6 +27,9 @@ from mflux.models.seedvr2.weights.seedvr2_weight_definition import (
 #   seedvr2_7b_transformer   numz/SeedVR2_comfyUI @ 09ced7102363  seedvr2_ema_7b_fp16.safetensors
 #   qwen21_text_encoder      Qwen/Qwen-Image-2.1 @ 790c92633540  text_encoder/
 #   qwen21_transformer       Qwen/Qwen-Image-2.1 @ 790c92633540  transformer/
+#   qwen_image_vae           Qwen/Qwen-Image-2512 @ 25468b98e327  vae/
+#   z_image_controlnet_union alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 @ 5155fc56d178
+#                            Z-Image-Turbo-Fun-Controlnet-Union-2.1.safetensors
 # To regenerate one, take the keys of mx.load(<file>) (lazy, reads no weights) or of the shard index's weight_map;
 # only fibo_vlm_decoder is then filtered, to the "model.language_model" and "lm_head" prefixes.
 # A required mapping entry these names cannot satisfy would reject the official checkpoint at load time.
@@ -63,6 +68,8 @@ class _Component:
         ("seedvr2_7b_transformer", _Component.of(SeedVR2WeightDefinition7B, "transformer")),
         ("qwen21_text_encoder", _Component.of(Qwen21WeightDefinition, "text_encoder")),
         ("qwen21_transformer", _Component.of(Qwen21WeightDefinition, "transformer")),
+        ("qwen_image_vae", _Component.of(QwenWeightDefinition, "vae")),
+        ("z_image_controlnet_union", ZImageControlnetWeightDefinition.get_controlnet_component()),
     ],
 )
 def test_an_official_checkpoint_carries_every_required_weight(fixture, component):

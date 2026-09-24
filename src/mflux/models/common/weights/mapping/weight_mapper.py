@@ -61,17 +61,23 @@ class WeightMapper:
         num_blocks: Optional[int] = None,
         num_layers: Optional[int] = None,
     ) -> List[WeightTarget]:
-        # Met when any expanded source name is present. Counted per declared target, not per expanded tensor:
-        # _build_flat_mapping expands every block pattern to the largest block count it detects.
         num_blocks, num_layers = WeightMapper._block_and_layer_counts(hf_weights, num_blocks, num_layers)
         return [
             target
             for target in mapping
-            if target.required
-            and not any(
-                name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)
-            )
+            if WeightMapper._first_missing_name(hf_weights, target, num_blocks, num_layers) is not None
         ]
+
+    @staticmethod
+    def missing_required_names(
+        hf_weights: Dict[str, mx.array],
+        mapping: List[WeightTarget],
+        num_blocks: Optional[int] = None,
+        num_layers: Optional[int] = None,
+    ) -> List[str]:
+        num_blocks, num_layers = WeightMapper._block_and_layer_counts(hf_weights, num_blocks, num_layers)
+        names = (WeightMapper._first_missing_name(hf_weights, target, num_blocks, num_layers) for target in mapping)
+        return [name for name in names if name is not None]
 
     @staticmethod
     def unmapped_names(
@@ -93,6 +99,59 @@ class WeightMapper:
         if num_layers is None:
             num_layers = WeightMapper._detect_num_layers(hf_weights)
         return num_blocks, num_layers
+
+    @staticmethod
+    def _first_missing_name(
+        hf_weights: Dict[str, mx.array], target: WeightTarget, num_blocks: int, num_layers: int
+    ) -> Optional[str]:
+        # A required block or layer weight has to be in every block of its family that the checkpoint has. Only
+        # blocks the checkpoint has count: _build_flat_mapping expands every block pattern to the largest block count
+        # it detects, and trimmed checkpoints ship fewer blocks. Optional ones are left alone, since some sit in only
+        # some blocks (the last up block of the FLUX.1 VAE has no upsampler).
+        if not target.required:
+            return None
+        if not any(name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)):
+            return WeightMapper._example_name(target)
+        indexed = WeightMapper._indexed_patterns(target)
+        for index in WeightMapper._present_indices(hf_weights, indexed):
+            if target.max_blocks is not None and index >= target.max_blocks:
+                continue
+            names = [pattern.replace(placeholder, str(index)) for pattern, placeholder in indexed]
+            if not any(name in hf_weights for name in names):
+                return names[0]
+        return None
+
+    @staticmethod
+    def _indexed_patterns(target: WeightTarget) -> List[tuple[str, str]]:
+        # Source patterns numbered by one {block} or {layer} that the destination is numbered by too. Up blocks
+        # ({block} with {res}) and one-to-many sources keep the any-name rule.
+        indexed = []
+        for pattern in target.from_pattern:
+            placeholders = [p for p in ("{block}", "{layer}", "{i}", "{res}") if p in pattern]
+            if len(placeholders) == 1 and placeholders[0] in ("{block}", "{layer}"):
+                placeholder = placeholders[0]
+                if placeholder in target.to_pattern and pattern.index(placeholder) > 0:
+                    indexed.append((pattern, placeholder))
+        return indexed
+
+    @staticmethod
+    def _present_indices(hf_weights: Dict[str, mx.array], indexed: List[tuple[str, str]]) -> List[int]:
+        present = set()
+        for pattern, placeholder in indexed:
+            prefix = pattern[: pattern.index(placeholder)]
+            for name in hf_weights:
+                if name.startswith(prefix):
+                    head = name[len(prefix) :].split(".", 1)[0]
+                    if head.isdigit():
+                        present.add(int(head))
+        return sorted(present)
+
+    @staticmethod
+    def _example_name(target: WeightTarget) -> str:
+        name = target.from_pattern[0] if target.from_pattern else target.to_pattern
+        for placeholder in ("{block}", "{layer}", "{i}", "{res}"):
+            name = name.replace(placeholder, "0")
+        return name
 
     @staticmethod
     def _detect_num_blocks(hf_weights: Dict[str, mx.array]) -> int:

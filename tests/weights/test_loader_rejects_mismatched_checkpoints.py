@@ -102,6 +102,21 @@ def test_the_message_shows_the_renamed_tensor_not_the_ones_that_matched(tmp_path
 
 
 @pytest.mark.fast
+def test_the_message_names_the_block_that_lacks_a_weight(tmp_path):
+    # Block 0 is complete; block 1 has another weight but not its projection, so its random start value would stay.
+    message = _BlockModel.rejection(
+        tmp_path,
+        {
+            "model.kept.weight": mx.ones((2,)),
+            "model.blocks.0.proj.weight": mx.ones((2,)),
+            "model.blocks.1.norm.weight": mx.ones((2,)),
+        },
+    )
+
+    assert "1 required weight has no match (expected names like model.blocks.1.proj.weight;" in message
+
+
+@pytest.mark.fast
 def test_the_message_skips_quantization_scales_of_weights_that_matched(tmp_path):
     # The issue 748 checkpoint is 4-bit: 464 of its 467 unused names were the scales and biases of weights that
     # matched, and they sorted ahead of the three renamed tensors.
