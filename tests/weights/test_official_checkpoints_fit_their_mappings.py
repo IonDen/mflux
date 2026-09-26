@@ -134,3 +134,33 @@ def test_the_z_image_transformer_still_requires_its_pad_tokens():
     required = {target.to_pattern for target in transformer.mapping_getter() if target.required}
 
     assert {"x_pad_token", "cap_pad_token"} <= required
+
+
+@pytest.mark.fast
+def test_the_saved_layout_controlnet_component_uses_the_controlnet_list():
+    component = _Component.of(FluxControlnetWeightDefinition, "transformer_controlnet")
+
+    assert _Component.missing(_OfficialNames.weights("flux1_controlnet_canny"), component) == []
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    ("removed", "reported"),
+    [
+        ("single_transformer_blocks.0.proj_out.weight", "single_transformer_blocks.{block}.proj_out.weight"),
+        ("controlnet_single_blocks.0.bias", "controlnet_single_blocks.{block}.bias"),
+    ],
+)
+def test_a_controlnet_that_has_single_blocks_needs_each_of_their_weights(removed, reported):
+    # Canny ships no single blocks; give it a complete single block 0 and its head, then take one weight away.
+    component = FluxControlnetWeightDefinition.get_controlnet_component()
+    weights = _OfficialNames.weights("flux1_controlnet_canny")
+    for target in component.mapping_getter():
+        for pattern in target.from_pattern:
+            if pattern.startswith(("single_transformer_blocks.{block}.", "controlnet_single_blocks.{block}.")):
+                weights[pattern.replace("{block}", "0")] = mx.zeros((1,))
+    assert _Component.missing(weights, component) == []
+
+    del weights[removed]
+
+    assert [target.to_pattern for target in _Component.missing(weights, component)] == [reported]

@@ -143,3 +143,26 @@ def test_an_attention_index_the_checkpoint_does_not_have_is_not_demanded():
     weights = _Weights.named("decoder.mid_block.attentions.0.to_q.weight")
 
     assert WeightMapper.missing_required_names(weights, mapping) == []
+
+
+class _OptionalFamily:
+    MAPPING = [
+        WeightTarget(
+            to_pattern="single.{block}.proj.weight",
+            from_pattern=["single.{block}.proj.weight"],
+            required=False,
+            complete_when_present=True,
+        )
+    ]
+
+
+@pytest.mark.fast
+def test_an_optional_block_family_the_checkpoint_does_not_have_is_not_reported():
+    assert WeightMapper.missing_required_names(_Weights.named("double.0.proj.weight"), _OptionalFamily.MAPPING) == []
+
+
+@pytest.mark.fast
+def test_an_optional_block_family_the_checkpoint_has_must_be_complete():
+    weights = _Weights.named("single.0.proj.weight", "single.1.norm.weight")
+
+    assert WeightMapper.missing_required_names(weights, _OptionalFamily.MAPPING) == ["single.1.proj.weight"]

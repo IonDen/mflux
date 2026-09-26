@@ -110,10 +110,12 @@ class WeightMapper:
         # Only indices the checkpoint has count: _build_flat_mapping expands placeholders to detected or fixed counts
         # (every block pattern to the largest block count it detects, {i} to two where a VAE mid block has a single
         # attention), and trimmed checkpoints ship fewer blocks. Optional ones are left alone, since some sit in only
-        # some blocks (the last up block of the FLUX.1 VAE has no upsampler).
-        if not target.required:
+        # some blocks (the last up block of the FLUX.1 VAE has no upsampler), unless complete_when_present asks for the
+        # per-block check on a family the checkpoint may leave out as a whole (a ControlNet's single blocks).
+        if not target.required and not target.complete_when_present:
             return None
-        if not any(name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers)):
+        found = any(name in hf_weights for name in WeightMapper._build_flat_mapping([target], num_blocks, num_layers))
+        if target.required and not found:
             return WeightMapper._example_name(target)
         patterns = WeightMapper._indexed_patterns(target)
         for pattern in patterns:

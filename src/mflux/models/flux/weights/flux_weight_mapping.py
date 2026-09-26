@@ -297,10 +297,12 @@ class FluxWeightMapping(WeightMapping):
     @staticmethod
     def get_controlnet_transformer_mapping() -> List[WeightTarget]:
         # A ControlNet is a truncated FLUX transformer: no output head, and the Canny and Upscaler checkpoints
-        # carry no single blocks. Those entries still load when a ControlNet has them.
-        optional = ("proj_out.", "norm_out.", "single_transformer_blocks.")
+        # carry no single blocks. When a ControlNet has single blocks, each of them must be complete.
+        single = "single_transformer_blocks."
         transformer = [
-            replace(target, required=False) if target.to_pattern.startswith(optional) else target
+            replace(target, required=False, complete_when_present=target.to_pattern.startswith(single))
+            if target.to_pattern.startswith((single, "proj_out.", "norm_out."))
+            else target
             for target in FluxWeightMapping.get_transformer_mapping()
         ]
         return transformer + [
@@ -327,12 +329,14 @@ class FluxWeightMapping(WeightMapping):
                 from_pattern=["controlnet_single_blocks.{block}.weight"],
                 max_blocks=38,
                 required=False,
+                complete_when_present=True,
             ),
             WeightTarget(
                 to_pattern="controlnet_single_blocks.{block}.bias",
                 from_pattern=["controlnet_single_blocks.{block}.bias"],
                 max_blocks=38,
                 required=False,
+                complete_when_present=True,
             ),
         ]
 
