@@ -10,6 +10,7 @@ from mflux.models.fibo.weights.fibo_weight_definition import FIBOWeightDefinitio
 from mflux.models.fibo_vlm.weights.fibo_vlm_weight_definition import FIBOVLMWeightDefinition
 from mflux.models.flux.weights.flux_weight_definition import FluxControlnetWeightDefinition, FluxWeightDefinition
 from mflux.models.flux.weights.flux_weight_mapping import FluxWeightMapping
+from mflux.models.ming_image.weights.ming_image_weight_definition import MingImageWeightDefinition
 from mflux.models.qwen.weights.qwen_weight_definition import QwenWeightDefinition
 from mflux.models.qwen21.weights.qwen21_weight_definition import Qwen21WeightDefinition
 from mflux.models.seedvr2.weights.seedvr2_weight_definition import (
@@ -17,6 +18,7 @@ from mflux.models.seedvr2.weights.seedvr2_weight_definition import (
     SeedVR2WeightDefinition7B,
 )
 from mflux.models.z_image.weights.z_image_controlnet_weight_definition import ZImageControlnetWeightDefinition
+from mflux.models.z_image.weights.z_image_weight_definition import ZImageWeightDefinition
 
 # Tensor names read from the safetensors headers of each official checkpoint (no weights), after the component's
 # own prefix filter and key transform, i.e. what the loader hands the check. Captured 2026-09-24 from:
@@ -30,6 +32,7 @@ from mflux.models.z_image.weights.z_image_controlnet_weight_definition import ZI
 #   qwen_image_vae           Qwen/Qwen-Image-2512 @ 25468b98e327  vae/
 #   z_image_controlnet_union alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 @ 5155fc56d178
 #                            Z-Image-Turbo-Fun-Controlnet-Union-2.1.safetensors
+#   ming_image_transformer   inclusionAI/Ming-Image-0.1-Design @ 208087ada148  transformer/
 # To regenerate one, take the keys of mx.load(<file>) (lazy, reads no weights) or of the shard index's weight_map;
 # only fibo_vlm_decoder is then filtered, to the "model.language_model" and "lm_head" prefixes.
 # A required mapping entry these names cannot satisfy would reject the official checkpoint at load time.
@@ -70,6 +73,7 @@ class _Component:
         ("qwen21_transformer", _Component.of(Qwen21WeightDefinition, "transformer")),
         ("qwen_image_vae", _Component.of(QwenWeightDefinition, "vae")),
         ("z_image_controlnet_union", ZImageControlnetWeightDefinition.get_controlnet_component()),
+        ("ming_image_transformer", _Component.of(MingImageWeightDefinition, "transformer")),
     ],
 )
 def test_an_official_checkpoint_carries_every_required_weight(fixture, component):
@@ -120,3 +124,13 @@ def test_the_issue_748_transformer_rename_is_caught_on_its_own():
     missing = _Component.missing(renamed, component)
 
     assert [target.from_pattern for target in missing] == [["modulation.1.weight"]]
+
+
+@pytest.mark.fast
+def test_the_z_image_transformer_still_requires_its_pad_tokens():
+    # Ming-Image reuses this name list without pad tokens; Z-Image itself builds and uses them.
+    mapping = ZImageWeightDefinition.get_components()
+    transformer = next(component for component in mapping if component.name == "transformer")
+    required = {target.to_pattern for target in transformer.mapping_getter() if target.required}
+
+    assert {"x_pad_token", "cap_pad_token"} <= required
