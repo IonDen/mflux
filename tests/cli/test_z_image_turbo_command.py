@@ -267,3 +267,25 @@ def test_main_lets_an_unexpected_generate_error_escape_and_still_reports_memory(
     with pytest.raises(RuntimeError, match="out of memory"):
         cli.main()
     assert "Peak MLX memory: " in capsys.readouterr().out
+
+
+@pytest.mark.fast
+def test_validate_returns_the_turbo_config_without_building_a_model(monkeypatch, tmp_path):
+    # A UI checks a request before queuing it: no model, and no input file is opened, so a
+    # missing reference image or prompt file is still the generate step's problem.
+    args = args_for(
+        monkeypatch,
+        ["--prompt-file", str(tmp_path / "missing.txt"), "--image", str(tmp_path / "missing.png")],
+    )
+    assert cli.ZImageTurboCommand.validate(args) == AVAILABLE_MODELS["z-image-turbo"]
+    assert FakeZImage.instances == []
+
+
+@pytest.mark.fast
+def test_validate_rejects_a_foreign_model(monkeypatch):
+    from mflux.utils.exceptions import ModelConfigError
+
+    args = args_for(monkeypatch, ["--prompt", "x", "--model", "dev"])
+    with pytest.raises(ModelConfigError, match="only accepts the aliases"):
+        cli.ZImageTurboCommand.validate(args)
+    assert FakeZImage.instances == []
