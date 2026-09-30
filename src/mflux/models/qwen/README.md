@@ -42,6 +42,8 @@ image = model.generate_image(
 )
 image.save("qwen_tiger.png")
 ```
+
+You can also call the steps of `mflux-generate-qwen` and `mflux-generate-qwen-edit` from Python. `QwenImageCommand` (in `mflux.models.qwen.cli.qwen_image_generate`) and `QwenImageEditCommand` (in `mflux.models.qwen.cli.qwen_image_edit_generate`) each have `validate(args)`, `load(args)` and `generate(model, args, seed, prompt)`. They work like the Z-Image Turbo steps; the [Z-Image README](../z_image/README.md#z-image-turbo-example) has a full script and the rules for keeping a model loaded. One thing is bigger here: the text encoder takes about 14 GB of memory (15 GB for edits) and `--quantize` does not shrink it, so a process that keeps the model loaded holds all of it while images are made. For these two commands `validate()` adds no checks of its own; it always returns the command's one model config. When `--guidance` is not given, `generate()` uses the command's default: 3.5, or 2.5 for edits. `QwenImage` keeps each prompt's text embeddings in `model.prompt_cache`, which grows by one entry per distinct pair of prompt and negative prompt. A process that stays up should clear it from time to time with `model.prompt_cache.clear()`, then `gc.collect()` and `mx.clear_cache()`. `QwenImageEdit` does not use that cache.
 </details>
 
 <details>
@@ -199,6 +201,8 @@ image = model.generate_image(
 )
 image.save("qwen_edit_dogs.png")
 ```
+
+To run the command itself step by step with its own flags, use `QwenImageEditCommand` from `mflux.models.qwen.cli.qwen_image_edit_generate`. It has the same `validate(args)`, `load(args)` and `generate(model, args, seed, prompt)` steps as `QwenImageCommand` in the text-to-image section, with a default guidance of 2.5.
 </details>
 
 ### Example 2: Single Image with LoRAs (Camera Angle Transformations)
