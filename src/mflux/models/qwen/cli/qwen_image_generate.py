@@ -1,9 +1,11 @@
+import copy
 from argparse import Namespace
 
 from mflux.callbacks.callback_manager import CallbackManager
 from mflux.cli.defaults import defaults as ui_defaults
 from mflux.cli.parser.parsers import CommandLineParser, lora_init_kwargs_from_args
 from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.common.resolution.config_resolution import ConfigResolution
 from mflux.models.qwen.latent_creator.qwen_latent_creator import QwenLatentCreator
 from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 from mflux.utils.dimension_resolver import DimensionResolver
@@ -33,11 +35,14 @@ class QwenImageCommand:
 
     @staticmethod
     def validate(args: Namespace) -> ModelConfig:
-        # This command runs one model, so there is nothing left to check without weights:
-        # parse_args already checked the flags, a repo id or path arrives as args.model_path
-        # and loads on this config, and another built-in --model name does not change the
-        # config (it only moves the --steps default at parse time).
-        return ModelConfig.qwen_image()
+        # Weight-free: resolves --model against the in-memory registry only, so a name this
+        # command cannot run fails here, before anything loads.
+        return ConfigResolution.resolve_restricted(
+            args.model,
+            DEFAULT_MODEL,
+            model_path=args.model_path,
+            base_model=args.base_model,
+        )
 
     @staticmethod
     def load(args: Namespace) -> QwenImage:
@@ -93,14 +98,16 @@ def main():
     )
 
     try:
-        # Sizes are resolved once per run, before the first prompt is read. generate()
-        # resolves again for direct callers, which changes nothing on plain numbers.
-        args.width, args.height = DimensionResolver.resolve(
+        # Sizes are resolved once per run, before the first prompt is read, into a copy so the
+        # args the callbacks were given keep the flags as passed. generate() resolves again for
+        # direct callers, which changes nothing on plain numbers.
+        run_args = copy.copy(args)
+        run_args.width, run_args.height = DimensionResolver.resolve(
             width=args.width, height=args.height, reference_image_path=args.image_path
         )
         for seed in args.seed:
             # 3. Generate an image for each seed value
-            image = QwenImageCommand.generate(model, args, seed, PromptUtil.read_prompt(args))
+            image = QwenImageCommand.generate(model, run_args, seed, PromptUtil.read_prompt(args))
             # 4. Save the image
             image.save(path=args.output.format(seed=seed), export_json_metadata=args.metadata)
     except (StopImageGenerationException, PromptFileReadError) as exc:

@@ -141,19 +141,54 @@ def test_main_keeps_the_default_flags_off(monkeypatch, tmp_path):
 
 @pytest.mark.fast
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["--model", "dev"],
+        ["--model", "qwen-image-edit"],
+        ["--model", "someone/qwen-mirror", "--base-model", "dev"],
+    ],
+    ids=["foreign-built-in-name", "edit-sibling-name", "repo-id-with-foreign-base"],
+)
+def test_main_rejects_a_model_name_this_command_cannot_run_before_building_anything(monkeypatch, argv):
+    from mflux.utils.exceptions import ModelConfigError
+
+    monkeypatch.setattr(sys, "argv", ["mflux-generate-qwen", "--prompt", "x", *argv])
+    with pytest.raises(ModelConfigError, match="only accepts the aliases"):
+        cli.main()
+    assert FakeQwenImage.instances == []
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize(
     ("argv", "model_path"),
     [
-        (["--model", "dev"], None),
-        (["--model", "someone/qwen-mirror", "--base-model", "dev"], "someone/qwen-mirror"),
+        (["--model", "qwen"], None),
+        (["--model", "qwen-2512"], None),
+        (["--model", "someone/my-finetune", "--base-model", "qwen-image"], "someone/my-finetune"),
     ],
-    ids=["foreign-built-in-name", "repo-id-with-foreign-base"],
+    ids=["alias", "2512-alias", "repo-id-with-own-base"],
 )
-def test_main_builds_the_qwen_image_config_for_model_names_todays_behavior(monkeypatch, argv, model_path):
-    # Today's behavior: the model is built on the qwen-image config whatever --model and
-    # --base-model carry, and a built-in name never becomes the model path.
+def test_main_builds_the_qwen_image_config_for_its_own_names(monkeypatch, argv, model_path):
     model = run_main(monkeypatch, ["--prompt", "x", *argv])
     assert model.bound_init()["model_config"] is AVAILABLE_MODELS["qwen-image"]
     assert model.bound_init()["model_path"] == model_path
+
+
+@pytest.mark.fast
+def test_main_hands_the_callbacks_the_size_flags_as_passed(monkeypatch, ref_png, full_argv):
+    # main() resolves "2x"/"3x" once for the run, but the args a callback is given keep the
+    # flags as typed, the way they were before the command steps existed.
+    handed = {}
+    register = cli.CallbackManager.register_callbacks
+
+    def keep_args(**kwargs):
+        handed["args"] = kwargs["args"]
+        return register(**kwargs)
+
+    monkeypatch.setattr(cli.CallbackManager, "register_callbacks", keep_args)
+    model = run_main(monkeypatch, full_argv)
+    assert (str(handed["args"].width), str(handed["args"].height)) == ("2x", "3x")
+    assert [(c["width"], c["height"]) for c in model.generate_calls] == [(128, 96), (128, 96)]
 
 
 @pytest.mark.fast
@@ -300,9 +335,12 @@ def test_validate_returns_the_config_the_model_class_defaults_to(monkeypatch, tm
     [["--model", "dev"], ["--model", "someone/qwen-mirror", "--base-model", "dev"]],
     ids=["foreign-built-in-name", "repo-id-with-foreign-base"],
 )
-def test_validate_returns_the_one_config_for_every_model_name_todays_behavior(monkeypatch, argv):
+def test_validate_rejects_a_model_name_this_command_cannot_run(monkeypatch, argv):
+    from mflux.utils.exceptions import ModelConfigError
+
     args = args_for(monkeypatch, ["--prompt", "x", *argv])
-    assert cli.QwenImageCommand.validate(args) is AVAILABLE_MODELS["qwen-image"]
+    with pytest.raises(ModelConfigError, match="only accepts the aliases"):
+        cli.QwenImageCommand.validate(args)
 
 
 @pytest.mark.fast

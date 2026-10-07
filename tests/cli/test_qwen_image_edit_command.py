@@ -138,13 +138,53 @@ def test_main_scales_from_the_first_image(monkeypatch, first_png, second_png):
 
 
 @pytest.mark.fast
-@pytest.mark.parametrize("name", ["dev", "qwen-image"])
-def test_main_builds_the_edit_config_for_a_built_in_model_name_todays_behavior(monkeypatch, first_png, name):
-    # Today's behavior: the model is built on the edit config whichever built-in name
-    # --model carries.
-    model = run_main(monkeypatch, ["--prompt", "x", "--image-paths", str(first_png), "--model", name])
+@pytest.mark.parametrize(
+    "argv",
+    [["--model", "dev"], ["--model", "qwen-image"], ["--model", "someone/edit-mirror", "--base-model", "dev"]],
+    ids=["foreign-built-in-name", "txt2img-sibling-name", "repo-id-with-foreign-base"],
+)
+def test_main_rejects_a_model_name_this_command_cannot_run_before_building_anything(monkeypatch, first_png, argv):
+    from mflux.utils.exceptions import ModelConfigError
+
+    monkeypatch.setattr(
+        sys, "argv", ["mflux-generate-qwen-edit", "--prompt", "x", "--image-paths", str(first_png), *argv]
+    )
+    with pytest.raises(ModelConfigError, match="only accepts the aliases"):
+        cli.main()
+    assert FakeQwenImageEdit.instances == []
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    ("argv", "model_path"),
+    [
+        (["--model", "qwen-edit"], None),
+        (["--model", "qwen-edit-2511"], None),
+        (["--model", "someone/my-finetune", "--base-model", "qwen-image-edit"], "someone/my-finetune"),
+    ],
+    ids=["alias", "2511-alias", "repo-id-with-own-base"],
+)
+def test_main_builds_the_edit_config_for_its_own_names(monkeypatch, first_png, argv, model_path):
+    model = run_main(monkeypatch, ["--prompt", "x", "--image-paths", str(first_png), *argv])
     assert model.bound_init()["model_config"] is AVAILABLE_MODELS["qwen-image-edit"]
-    assert model.bound_init()["model_path"] is None
+    assert model.bound_init()["model_path"] == model_path
+
+
+@pytest.mark.fast
+def test_main_hands_the_callbacks_the_size_flags_as_passed(monkeypatch, first_png, second_png, full_argv):
+    # main() resolves "2x"/"3x" once for the run, but the args a callback is given keep the
+    # flags as typed, the way they were before the command steps existed.
+    handed = {}
+    register = cli.CallbackManager.register_callbacks
+
+    def keep_args(**kwargs):
+        handed["args"] = kwargs["args"]
+        return register(**kwargs)
+
+    monkeypatch.setattr(cli.CallbackManager, "register_callbacks", keep_args)
+    model = run_main(monkeypatch, full_argv)
+    assert (str(handed["args"].width), str(handed["args"].height)) == ("2x", "3x")
+    assert [(c["width"], c["height"]) for c in model.generate_calls] == [(128, 96), (128, 96)]
 
 
 @pytest.mark.fast
@@ -333,9 +373,12 @@ def test_validate_returns_the_config_the_model_class_defaults_to(monkeypatch, tm
     [["--model", "qwen-image"], ["--model", "someone/edit-mirror", "--base-model", "dev"]],
     ids=["sibling-built-in-name", "repo-id-with-foreign-base"],
 )
-def test_validate_returns_the_one_config_for_every_model_name_todays_behavior(monkeypatch, first_png, argv):
+def test_validate_rejects_a_model_name_this_command_cannot_run(monkeypatch, first_png, argv):
+    from mflux.utils.exceptions import ModelConfigError
+
     args = args_for(monkeypatch, ["--prompt", "x", "--image-paths", str(first_png), *argv])
-    assert cli.QwenImageEditCommand.validate(args) is AVAILABLE_MODELS["qwen-image-edit"]
+    with pytest.raises(ModelConfigError, match="only accepts the aliases"):
+        cli.QwenImageEditCommand.validate(args)
 
 
 @pytest.mark.fast
@@ -359,6 +402,18 @@ def test_generate_returns_the_image_unsaved_with_the_given_prompt(monkeypatch, f
         {**expected_generate_call(7, first_png, second_png), "prompt": "a different puffin"}
     ]
     assert (str(args.width), str(args.height)) == ("2x", "3x")
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("image_paths", [[], None], ids=["empty", "none"])
+def test_generate_rejects_args_without_an_input_image(monkeypatch, first_png, image_paths):
+    # The parser requires --image-paths; a Python caller building args by hand gets a
+    # ValueError that names the field, not an IndexError from inside generate().
+    args = args_for(monkeypatch, ["--prompt", "x", "--image-paths", str(first_png)])
+    model = cli.QwenImageEditCommand.load(args)
+    args.image_paths = image_paths
+    with pytest.raises(ValueError, match="image_paths"):
+        cli.QwenImageEditCommand.generate(model, args, 1, "x")
 
 
 @pytest.mark.fast
