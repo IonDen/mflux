@@ -121,6 +121,9 @@ class MOSSImage(nn.Module):
         )
 
     def save_model(self, base_path: str) -> None:
+        # The weights load lazily. Read them all first: a save over the checkpoint they come from
+        # would otherwise truncate a shard before reading it.
+        mx.eval(self.parameters())
         ModelSaver.save_model(
             model=self,
             bits=self.bits,

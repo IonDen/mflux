@@ -8,6 +8,7 @@ from mlx.utils import tree_flatten
 from mflux.models.common.config import ModelConfig
 from mflux.models.common.weights.saving.model_saver import ModelSaver
 from mflux.models.moss_image.moss_image_initializer import MOSSImageInitializer
+from mflux.models.moss_image.variants.txt2img.moss_image import MOSSImage
 from mflux.models.moss_image.weights.moss_image_weight_definition import MOSSImageWeightDefinition
 
 pytestmark = pytest.mark.fast
@@ -65,3 +66,26 @@ def test_load_reads_each_component_at_its_first_use(tmp_path, monkeypatch, saved
     text_encoder_bytes = _nbytes(restored.text_encoder)
     assert text_encoder_bytes <= read < text_encoder_bytes + _nbytes(restored.transformer)
     assert mx.allclose(encoded, expected, atol=0.05).item()
+
+
+@pytest.mark.parametrize("bits", [None, 8])
+def test_save_over_the_lazily_loaded_checkpoint_keeps_it(tmp_path, monkeypatch, bits):
+    # mflux-save --model PATH --path PATH writes over the shards the lazy weights still read from.
+    original = TinyMOSS.make()
+    if bits:
+        for module in vars(original).values():
+            nn.quantize(module, bits=bits, class_predicate=MOSSImageWeightDefinition.quantization_predicate)
+    x = mx.ones((1, 1024))
+    expected = original.transformer(x)
+    mx.eval([module.parameters() for module in vars(original).values()], expected)
+    ModelSaver.save_model(original, bits, str(tmp_path), MOSSImageWeightDefinition)
+    monkeypatch.setattr(MOSSImageInitializer, "_init_models", TinyMOSS.init_models)
+    monkeypatch.setattr(MOSSImageInitializer, "_init_tokenizers", lambda model, path: None)
+    loaded = nn.Module()
+    MOSSImageInitializer.init(loaded, ModelConfig.moss_image_sft(), quantize=None, model_path=str(tmp_path))
+
+    MOSSImage.save_model(loaded, str(tmp_path))
+
+    reloaded = nn.Module()
+    MOSSImageInitializer.init(reloaded, ModelConfig.moss_image_sft(), quantize=None, model_path=str(tmp_path))
+    assert mx.allclose(reloaded.transformer(x), expected, atol=0.05).item()
