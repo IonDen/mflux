@@ -1,11 +1,15 @@
 from mflux.callbacks.callback_registry import CallbackRegistry
 from mflux.models.common.config import ModelConfig
+from mflux.models.common.lora.mapping.lora_loader import LoRALoader
+from mflux.models.common.resolution.lora_resolution import LoraResolution
 from mflux.models.common.tokenizer import TokenizerLoader
 from mflux.models.common.weights.loading.loaded_weights import LoadedWeights, MetaData
 from mflux.models.common.weights.loading.weight_applier import WeightApplier
 from mflux.models.common.weights.loading.weight_loader import WeightLoader
 from mflux.models.flux2.model.flux2_text_encoder.qwen3_text_encoder import Qwen3TextEncoder
+from mflux.models.iris.model.iris_scheduler.iris_few_step_scheduler import IrisFewStepScheduler
 from mflux.models.iris.model.iris_transformer.iris_transformer import IrisTransformer
+from mflux.models.iris.weights.iris_lora_mapping import IrisLoRAMapping
 from mflux.models.iris.weights.iris_weight_definition import IrisTurboWeightDefinition, IrisWeightDefinition
 
 
@@ -16,6 +20,9 @@ class IrisInitializer:
         model_config: ModelConfig,
         quantize: int | None,
         model_path: str | None = None,
+        lora_paths: list[str] | None = None,
+        lora_scales: list[float] | None = None,
+        bake_lora: bool = False,
     ) -> None:
         definition = IrisInitializer.weight_definition(model_config)
         saved_path = IrisInitializer.saved_path(model_config, model_path)
@@ -24,6 +31,7 @@ class IrisInitializer:
         IrisInitializer._init_tokenizers(model, definition, saved_path)
         IrisInitializer._init_models(model)
         IrisInitializer._apply_weights(model, weights, quantize, definition)
+        IrisInitializer._apply_loras(model, weights, lora_paths, lora_scales, bake_lora)
 
     @staticmethod
     def saved_path(model_config: ModelConfig, model_path: str | None) -> str | None:
@@ -77,6 +85,25 @@ class IrisInitializer:
     def _init_models(model) -> None:
         model.transformer = IrisTransformer()
         model.text_encoder = Qwen3TextEncoder(**model.model_config.text_encoder_overrides)
+
+    @staticmethod
+    def _apply_loras(model, weights: LoadedWeights, lora_paths, lora_scales, bake_lora: bool) -> None:
+        IrisFewStepScheduler.refuse_turbo_svd(LoraResolution.resolve_paths(lora_paths))
+        model.lora_paths, model.lora_scales = LoRALoader.load_and_apply_lora(
+            lora_mapping=IrisLoRAMapping.get_mapping(),
+            transformer=model.transformer,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            bake_lora=bake_lora,
+            dense_weights=weights.dense_component("transformer"),
+        )
+        # A few-step LoRA distilled from the base model switches the base model to its sampler, and says so. Turbo
+        # always runs its own 4-step sampler, so there the LoRA changes only the weights
+        is_base = model.model_config.supports_guidance
+        model.few_step = IrisFewStepScheduler.from_lora_files(model.lora_paths, model.lora_scales) if is_base else None
+        if model.few_step is not None:
+            steps, shift = model.few_step
+            print(f"⏩ Few-step LoRA (turbo_steps={steps}, shift={shift} in its metadata): the base model runs {steps} steps without CFG; --steps still applies, --guidance and --negative-prompt do not.")  # fmt: off
 
     @staticmethod
     def _apply_weights(model, weights: LoadedWeights, quantize: int | None, definition) -> None:

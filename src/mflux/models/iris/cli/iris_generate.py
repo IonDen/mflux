@@ -1,5 +1,5 @@
 from mflux.callbacks.callback_manager import CallbackManager
-from mflux.cli.parser.parsers import CommandLineParser
+from mflux.cli.parser.parsers import CommandLineParser, lora_init_kwargs_from_args
 from mflux.models.common.config.model_config import AVAILABLE_MODELS
 from mflux.models.common.resolution.config_resolution import ConfigResolution
 from mflux.models.iris.latent_creator.iris_latent_creator import IrisLatentCreator
@@ -10,6 +10,9 @@ from mflux.utils.prompt_util import PromptUtil
 
 # The model this CLI runs when --model is omitted; the parser keys the --steps default (4) off it.
 DEFAULT_MODEL = "iris-3b"
+
+# LoRAs stay separate layers unless --bake-lora (see Iris.DEFAULT_BAKE_LORA)
+DEFAULT_BAKE_LORA = Iris.DEFAULT_BAKE_LORA
 
 # The other entries this CLI serves: the undistilled base model (100 steps, CFG 3.0).
 FAMILY_MODELS = tuple(key for key in AVAILABLE_MODELS if key.startswith("iris-") and key != DEFAULT_MODEL)
@@ -40,6 +43,7 @@ def build_parser() -> CommandLineParser:
     parser = CommandLineParser(description="Generate an image using Iris-3B.")
     parser.add_general_arguments()
     parser.add_model_arguments(require_model_arg=False, default_model=DEFAULT_MODEL)
+    parser.add_lora_arguments(bake_by_default=DEFAULT_BAKE_LORA)
     parser.add_image_generator_arguments(supports_metadata_config=True, supports_dimension_scale_factor=True)
     parser.add_output_arguments()
     return parser
@@ -70,7 +74,18 @@ def main():
         model_config=model_config,
         quantize=args.quantize,
         model_path=args.model_path,
+        **lora_init_kwargs_from_args(args),
     )
+    # The parser fills --steps with the base model's 100; a few-step LoRA runs its own count unless --steps or a
+    # metadata sidecar set one
+    steps = args.steps
+    if model.few_step is not None and getattr(args, "steps_is_default", False):
+        steps = None
+    if model.few_step is not None:
+        CommandLineParser.warn_ignored_options({
+            "--guidance": "a few-step LoRA has its guidance distilled in and runs without CFG.",
+            "--negative-prompt": "a few-step LoRA runs without CFG, so the negative prompt is never encoded.",
+        })  # fmt: off
 
     memory_saver = CallbackManager.register_callbacks(
         args=args,
@@ -85,7 +100,7 @@ def main():
                 prompt=PromptUtil.read_prompt(args),
                 width=width,
                 height=height,
-                num_inference_steps=args.steps,
+                num_inference_steps=steps,
                 guidance=args.guidance,
                 negative_prompt=args.negative_prompt,
             )

@@ -23,6 +23,7 @@ from mflux.models.iris.variants import Iris
 class _StubIris:
     # Records what the CLI hands the model instead of loading 14 GB of weights.
     instances: list = []
+    few_step = None
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -118,6 +119,30 @@ class TestIrisGenerateCli:
         assert by_name.kwargs["model_config"] is AVAILABLE_MODELS["iris-3b-base"]
         assert by_flag.kwargs["model_config"] is AVAILABLE_MODELS["iris-3b-base"]
 
+    def test_loras_reach_the_model_and_a_few_step_lora_warns_about_guidance(self, run_cli, monkeypatch, tmp_path):
+        style, turbo = tmp_path / "style.safetensors", tmp_path / "turbo.safetensors"
+        style.touch()
+        turbo.touch()
+        model, warned = run_cli("--model", "iris-3b-base", "--lora", str(style), "0.5")
+        assert (model.kwargs["lora_paths"], model.kwargs["lora_scales"]) == ([str(style)], [0.5])
+        assert model.kwargs["bake_lora"] is False
+        assert not any("--guidance" in w for w in warned)
+
+        assert model.generated[0]["num_inference_steps"] == 100
+
+        # A few-step LoRA runs its own step count, not the base model's default, unless --steps is given
+        monkeypatch.setattr(_StubIris, "few_step", (4, 4.0))
+        model, warned = run_cli("--model", "iris-3b-base", "--lora", str(turbo), "--guidance", "3.0")
+        assert any(w.startswith("--guidance is ignored; a few-step LoRA") for w in warned)
+        assert model.generated[0]["num_inference_steps"] is None
+        model, _ = run_cli("--model", "iris-3b-base", "--lora", str(turbo), "--steps", "6")
+        assert model.generated[0]["num_inference_steps"] == 6
+        # A replayed run keeps the step count its metadata sidecar recorded
+        sidecar = tmp_path / "run.json"
+        sidecar.write_text(json.dumps({"prompt": "a fox", "model": "iris-3b-base", "seed": 1, "steps": 6}))
+        model, _ = run_cli("--lora", str(turbo), "--config-from-metadata", str(sidecar))
+        assert model.generated[0]["num_inference_steps"] == 6
+
     def test_a_foreign_model_is_rejected(self, run_cli):
         with pytest.raises(Exception, match="only accepts the aliases"):
             run_cli("--model", "dev")
@@ -134,7 +159,7 @@ class TestIrisGenerateCli:
         assert status["--steps"] == status["--guidance"] == status["--negative-prompt"] == "conditional"
         assert status["--scheduler"] == status["--vae-tiling"] == status["--vae-tile-size"] == "ignored"
         assert "--compute-precision" not in status
-        assert "--lora" not in status
+        assert status["--lora"] == status["--bake-lora"] == "honored"
 
 
 @pytest.mark.fast
@@ -350,6 +375,7 @@ class TestIrisModel:
         model.callbacks.register(Recorder())
         model.prompt_cache = {"x": (mx.zeros((1,)), mx.zeros((1,)))}
         model.bits = None
+        model.few_step, model.lora_paths, model.lora_scales = None, None, None
 
         model.generate_image(seed=1, prompt="x", width=32, height=32)
 
